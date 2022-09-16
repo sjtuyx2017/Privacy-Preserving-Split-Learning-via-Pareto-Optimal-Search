@@ -1,4 +1,4 @@
-# only 2 convolutional layers are deployed on local model
+# Encoder only outputs means, variances are set manually
 import functools
 import torch
 import numpy as np
@@ -60,9 +60,31 @@ class ResBlock_L(nn.Module):
         out += self.shortcut(x)
         return out
 
-class InfocensorEncoder(nn.Module):
+
+# local encoder with 2 CNN (without compression)
+class Encoder1(nn.Module):
     def __init__(self):
-        super(InfocensorEncoder,self).__init__()
+        super(Encoder1,self).__init__()
+        self.cnnModel = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 24
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+            nn.Dropout(0.2),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU()
+        )
+
+    def forward(self, x):
+        output = self.cnnModel(x)
+
+        return output
+
+class InfocensorEncoder1(nn.Module):
+    def __init__(self):
+        super(InfocensorEncoder1,self).__init__()
         self.cnnModel = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 24
@@ -90,29 +112,7 @@ class InfocensorEncoder(nn.Module):
         sigma = torch.exp(0.5 * logvar)
         return mu, sigma
 
-
-# local encoder with 2 CNN (without compression)
-class Encoder1(nn.Module):
-    def __init__(self):
-        super(Encoder1,self).__init__()
-        self.cnnModel = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 24
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU()
-        )
-
-    def forward(self, x):
-        output = self.cnnModel(x)
-
-        return output
-
-# local encoder with 2 CNN (compress to (4,4,64) tensor)
+# local encoder with 3 CNN
 class Encoder2(nn.Module):
     def __init__(self):
         super(Encoder2,self).__init__()
@@ -126,28 +126,6 @@ class Encoder2(nn.Module):
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
             nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.AdaptiveAvgPool2d((4, 4))
-        )
-
-    def forward(self, x):
-        output = self.cnnModel(x)
-        output = output.flatten(start_dim=1)
-        return output
-
-# local encoder with 3 CNN
-class Encoder3(nn.Module):
-    def __init__(self):
-        super(Encoder3,self).__init__()
-        self.cnnModel = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 24
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(),
             nn.Dropout(0.2),
             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 6
@@ -159,10 +137,9 @@ class Encoder3(nn.Module):
         output = self.cnnModel(x)
         return output
 
-# local encoder with 3 CNN (compress to (4,4,128) tensor)
-class Encoder4(nn.Module):
+class InfocensorEncoder2(nn.Module):
     def __init__(self):
-        super(Encoder4,self).__init__()
+        super(InfocensorEncoder2,self).__init__()
         self.cnnModel = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 24
@@ -173,23 +150,33 @@ class Encoder4(nn.Module):
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
             nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.2)
+        )
+        self.mu = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 6
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
             nn.BatchNorm2d(128),
-            nn.LeakyReLU(),
-            nn.AdaptiveAvgPool2d((4, 4))
+            nn.LeakyReLU()
+        )
+        self.logvar = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU()
         )
 
     def forward(self, x):
         output = self.cnnModel(x)
-        output = output.flatten(start_dim=1)
-        return output
+        mu = self.mu(output)
+        logvar = self.logvar(output)
+        sigma = torch.exp(0.5 * logvar)
+        return mu, sigma
+
 
 # local encoder with all the 4 CNN
-class Encoder5(nn.Module):
+class Encoder3(nn.Module):
     def __init__(self):
-        super(Encoder5,self).__init__()
+        super(Encoder3,self).__init__()
         self.cnnModel = nn.Sequential(
             nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 24
@@ -216,6 +203,46 @@ class Encoder5(nn.Module):
         output = self.cnnModel(x)
         output = output.squeeze()
         return output
+
+class InfocensorEncoder3(nn.Module):
+    def __init__(self):
+        super(InfocensorEncoder3,self).__init__()
+        self.cnnModel = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 24
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(),
+            nn.Dropout(0.2),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 12
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(),
+            nn.Dropout(0.2),
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 6
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(),
+            nn.Dropout(0.2)
+        )
+        self.mu = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 3
+            # nn.LeakyReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))  # flatten
+        )
+        self.logvar = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 3
+            # nn.LeakyReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))  # flatten
+        )
+
+    def forward(self, x):
+        output = self.cnnModel(x)
+        mu = self.mu(output)
+        logvar = self.logvar(output)
+        sigma = torch.exp(0.5 * logvar)
+        return mu, sigma
 
 
 class Classifier1(nn.Module):
@@ -254,16 +281,7 @@ class Classifier1(nn.Module):
 class Classifier2(nn.Module):
     def __init__(self, out_dim):
         super(Classifier2,self).__init__()
-        self.decnnModel = nn.Sequential(
-            nn.ConvTranspose2d(64, 64, 3),
-            nn.ConvTranspose2d(64, 64, 3)
-        )
         self.cnnModel = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 6
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
             nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 3
             # nn.LeakyReLU(),
@@ -283,84 +301,15 @@ class Classifier2(nn.Module):
         )
 
     def forward(self,x):
-        #print(x.shape)
-        shape = x.shape
-        x = x.reshape((shape[0],64,4,4))
-        x = self.decnnModel(x)
         output = self.cnnModel(x)
         output = output.squeeze()
         output = self.dnnModel(output)
         return output
+
 
 class Classifier3(nn.Module):
     def __init__(self, out_dim):
         super(Classifier3,self).__init__()
-        self.cnnModel = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 3
-            # nn.LeakyReLU(),
-            nn.AdaptiveAvgPool2d((1, 1))  # flatten
-        )
-
-        self.dnnModel = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, 32),
-            nn.LeakyReLU(),
-            nn.Linear(32, out_dim)
-        )
-
-    def forward(self,x):
-        output = self.cnnModel(x)
-        output = output.squeeze()
-        output = self.dnnModel(output)
-        return output
-
-
-class Classifier4(nn.Module):
-    def __init__(self, out_dim):
-        super(Classifier4,self).__init__()
-        self.decnnModel = nn.Sequential(
-            nn.ConvTranspose2d(128, 128, 3),
-            nn.ConvTranspose2d(128, 128, 3)
-        )
-        self.cnnModel = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 3
-            # nn.LeakyReLU(),
-            nn.AdaptiveAvgPool2d((1, 1))  # flatten
-        )
-
-        self.dnnModel = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.LeakyReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(64, 32),
-            nn.LeakyReLU(),
-            nn.Linear(32, out_dim)
-        )
-
-    def forward(self,x):
-        #print(x.shape)
-        shape = x.shape
-        x = x.reshape((shape[0],128,4,4))
-        x = self.decnnModel(x)
-        output = self.cnnModel(x)
-        output = output.squeeze()
-        output = self.dnnModel(output)
-        return output
-
-
-class Classifier5(nn.Module):
-    def __init__(self, out_dim):
-        super(Classifier5,self).__init__()
 
         self.dnnModel = nn.Sequential(
             nn.Linear(256, 128),
@@ -391,9 +340,6 @@ class Discriminator1(nn.Module):
         net += [ResBlock(256, 256, bn=bn)]
         #net += [ResBlock(256, 256, bn=bn)]
         #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
 
         net += [nn.Conv2d(256, 256, 3, 2, 1)]
         net += [nn.Flatten()]
@@ -404,47 +350,14 @@ class Discriminator1(nn.Module):
     def forward(self,x):
         output = self.Model(x)
         return output
-
 
 class Discriminator2(nn.Module):
     def __init__(self):
         super(Discriminator2, self).__init__()
         net = []
         bn = False
-        net += [nn.ConvTranspose2d(64, 64, 3)]
-        net += [nn.ConvTranspose2d(64, 64, 3)]
-        net += [nn.Conv2d(64, 128, 3, 2, 1)]
-        net += [nn.ReLU()]
         net += [nn.Conv2d(128, 256, 3, 2, 1)]
         net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-
-        #net += [nn.Conv2d(128, 128, 3, 2, 1)]
-        net += [nn.Flatten()]
-        net += [nn.Linear(1024, 1)]
-
-        self.Model = nn.Sequential(*net)
-
-    def forward(self,x):
-        shape = x.shape
-        x = x.reshape((shape[0], 64, 4, 4))
-        output = self.Model(x)
-        return output
-
-class Discriminator3(nn.Module):
-    def __init__(self):
-        super(Discriminator3, self).__init__()
-        net = []
-        bn = False
-        net += [nn.Conv2d(128, 256, 3, 2, 1)]
-        net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
         #net += [ResBlock(256, 256, bn=bn)]
         #net += [ResBlock(256, 256, bn=bn)]
 
@@ -458,37 +371,10 @@ class Discriminator3(nn.Module):
         output = self.Model(x)
         return output
 
-class Discriminator4(nn.Module):
+
+class Discriminator3(nn.Module):
     def __init__(self):
-        super(Discriminator4, self).__init__()
-        net = []
-        bn = False
-        net += [nn.ConvTranspose2d(128, 128, 3)]
-        net += [nn.ConvTranspose2d(128, 128, 3)]
-        net += [nn.Conv2d(128, 256, 3, 2, 1)]
-        net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-        #net += [ResBlock(256, 256, bn=bn)]
-
-        #net += [nn.Conv2d(128, 128, 3, 2, 1)]
-        net += [nn.Flatten()]
-        net += [nn.Linear(4096, 1)]
-
-        self.Model = nn.Sequential(*net)
-
-    def forward(self,x):
-        shape = x.shape
-        x = x.reshape((shape[0], 128, 4, 4))
-        output = self.Model(x)
-        return output
-
-
-class Discriminator5(nn.Module):
-    def __init__(self):
-        super(Discriminator5, self).__init__()
+        super(Discriminator3, self).__init__()
         net = []
         bn = False
         #net += [nn.ConvTranspose2d(256, 128, 3)]
@@ -518,12 +404,14 @@ class Decoder(nn.Module):
         print("input shape: ",in_dim)
         net = []
         net += [nn.Flatten()]
-        #if (class_num > 1):
-            #net += [nn.BatchNorm2d(math.prod(input_shape))]
-        net += [nn.Linear(math.prod(in_dim), out_dim)]
+        #net += [nn.BatchNorm1d(in_dim)]
+        #net += [nn.Linear(in_dim, 128)]
+        #net += [nn.LeakyReLU()]
+        net += [nn.Linear(in_dim, out_dim)]
 
         self.Model = nn.Sequential(*net)
 
     def forward(self,x):
+        #print("x: ", x.shape)
         output = self.Model(x)
         return output

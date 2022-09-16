@@ -44,26 +44,26 @@ def getNumParams(params):
             numTrainable += npParamCount
     return numParams, numTrainable
 
-def get_gaussian_md(mu,sigma,device):
-    feature_shape = mu.shape
-    dim2 = int(math.prod(feature_shape) / feature_shape[0])
-    mu = mu.reshape((feature_shape[0],dim2 ))
-    cov = torch.eye(dim2)
-    if sigma == 0:
-        return mu
-    fx, fy = mu.shape
-    # feature1 = feature.cpu().detach().numpy()
-    temp = np.random.multivariate_normal([0 for i in range(fy)], cov, fx)
-    # Data are generated according to covariance matrix and mean
-    # for i in range(1, fx):
-    # temp = np.concatenate((temp, np.random.multivariate_normal([0 for i in range(fy)], self.cov)), axis=0)
-    # Splicing sampling of high dimensional Gaussian distribution data
-    temp.resize((fx, fy))
-    temp = torch.from_numpy(temp).float()
-    # Since the stitched data is one-dimensional,
-    # we redefine it as the original dimension
-    feature = mu + temp.to(device) * (sigma ** 0.5)
-    return feature
+# def get_gaussian_md(mu,sigma,device):
+#     feature_shape = mu.shape
+#     dim2 = int(math.prod(feature_shape) / feature_shape[0])
+#     mu = mu.reshape((feature_shape[0],dim2 ))
+#     cov = torch.eye(dim2)
+#     if sigma == 0:
+#         return mu
+#     fx, fy = mu.shape
+#     # feature1 = feature.cpu().detach().numpy()
+#     temp = np.random.multivariate_normal([0 for i in range(fy)], cov, fx)
+#     # Data are generated according to covariance matrix and mean
+#     # for i in range(1, fx):
+#     # temp = np.concatenate((temp, np.random.multivariate_normal([0 for i in range(fy)], self.cov)), axis=0)
+#     # Splicing sampling of high dimensional Gaussian distribution data
+#     temp.resize((fx, fy))
+#     temp = torch.from_numpy(temp).float()
+#     # Since the stitched data is one-dimensional,
+#     # we redefine it as the original dimension
+#     feature = mu + temp.to(device) * (sigma ** 0.5)
+#     return feature
 
 # def get_gaussian(mu,sigma,device):
 #     #print("mu shape: ", mu.shape)
@@ -84,7 +84,7 @@ def get_gaussian_md(mu,sigma,device):
 #     feature = mu + temp.to(device) * (sigma ** 0.5)
 #     return feature
 
-def get_gaussian(mu, sigma, device):
+def get_gaussian(mu, sigma):
     #print("mu shape: ", mu.shape)
     #cov = torch.eye(mu.shape[1])
     if sigma == 0:

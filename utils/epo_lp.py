@@ -36,7 +36,7 @@ class EPO_LP(object):
         self.gamma = 0     # Stores the latest Optimum value of the LP problem
         self.mu_rl = 0     # Stores the latest non-uniformity
 
-    def get_alpha(self, l, G, r=None, C=False, relax=True,allow_privacy_ascent = False):
+    def get_alpha(self, l, G, r=None, C=False, relax=True):
         print("solving alpha")
         r = self.r if r is None else r
         #print("r: ",r)
@@ -64,8 +64,6 @@ class EPO_LP(object):
                 self.rhs.value = self.Ca.value.copy()
                 self.rhs.value[J] = -np.inf     # Not efficient; but works.
                 self.rhs.value[J_star_idx] = 0
-                if allow_privacy_ascent == False:
-                    self.rhs.value[1] = 0  # privacy loss is not allowed to ascent
             else:
                 #print("J set is empty")
                 self.rhs.value = np.zeros_like(self.Ca.value)

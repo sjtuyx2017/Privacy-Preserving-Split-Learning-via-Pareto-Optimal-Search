@@ -5,6 +5,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from collections import Counter
 import time
 
+seed = 1
+torch.manual_seed(seed)
+np.random.seed(seed)
+
 def load_main_dataset(dataset_name, label_name, private_attribute_name, batch_size):
 
     if dataset_name == 'celebA':
@@ -21,8 +25,8 @@ def load_main_dataset(dataset_name, label_name, private_attribute_name, batch_si
         raise ValueError(dataset_name)
 
     print('dataset: ', dataset_name)
-    print('cloud task: ', label_name)
-    print('attack task: ', private_attribute_name)
+    print('utility task: ', label_name)
+    print('privacy task: ', private_attribute_name)
 
     if label_name not in attribute_list:
         raise ValueError(label_name)
@@ -84,8 +88,8 @@ def load_attacker_dataset(dataset_name, label_name, private_attribute_name, batc
     else:
         raise ValueError(dataset_name)
 
-    print('cloud task: ', label_name)
-    print('attack task: ', private_attribute_name)
+    print('utility task: ', label_name)
+    print('privacy task: ', private_attribute_name)
     if label_name not in attribute_list:
         raise ValueError(label_name)
     if private_attribute_name not in attribute_list:
@@ -110,16 +114,11 @@ def load_attacker_dataset(dataset_name, label_name, private_attribute_name, batc
 
 # this data loader only contains data and accuracy label
 def construct_data_loader(data, label, private_label, batch_size):
-
     dataset = TensorDataset(data, label, private_label)
-
     data_loader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
 
     return data_loader
 
-
-if __name__ == '__main__':
-    train_loader, test_loader = load_main_dataset('UTKFace', 'age', 'gender', 200)
 
 
 

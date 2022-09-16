@@ -35,10 +35,13 @@ def reattach_grad(model: nn.Module, gdict: Dict[str, torch.Tensor]):
 
 
 def merge_gradients(gdict1: Dict[str, torch.Tensor], gdict2: Dict[str, torch.Tensor], weight):
-    if gdict1.keys() != gdict2.keys():
-        raise ValueError('gdict1 and gdict2 have different keys')
+    #if gdict1.keys() != gdict2.keys():
+        #raise ValueError('gdict1 and gdict2 have different keys')
     for name, grad in gdict1.items():
-        gdict2[name] = weight[0] * grad + weight[1] * gdict2[name]
+        if name in gdict2.keys():
+            gdict2[name] = weight[0] * grad + weight[1] * gdict2[name]
+        else:
+            gdict2[name] = weight[0] * grad #+ weight[1] * gdict2[name]
         #gdict2[name] += grad
     return gdict2
 

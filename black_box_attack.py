@@ -3,12 +3,12 @@ import os
 from torch import nn, optim
 import torch
 from load_data import load_main_dataset, load_attacker_dataset, construct_data_loader
+from sklearn.metrics import confusion_matrix
+from math import sqrt
 from models import (
-    Encoder1, Classifier1,
-    Encoder2, Classifier2,
-    Encoder3, Classifier3,
-    Encoder4, Classifier4,
-    Encoder5, Classifier5,
+    Encoder1, Classifier1, InfocensorEncoder1,
+    Encoder2, Classifier2, InfocensorEncoder2,
+    Encoder3, Classifier3, InfocensorEncoder3,
 )
 from utils.tools import smooth, get_gaussian, plot_and_save_figure, makedir
 import matplotlib.pyplot as plt
@@ -18,19 +18,19 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--lr', default=1e-3, type=float)
-parser.add_argument('--batch_size', default=400, type=int)
+parser.add_argument('--batch_size', default=500, type=int)
 parser.add_argument('--iterations', default=1000, type=int)
 parser.add_argument('--seed', default=1, type=int)
 parser.add_argument('--test_interval', default=50, type=int)
-parser.add_argument('--dir', default='./celebA_new_results/utility=BlackHair_privacy=Male/model-idx=3/defense=Noisy_iter=3000_bs=500_noise-sigma=1_attack=DSA', type=str)
+parser.add_argument('--dir', default='./celebA_results/utility=BlackHair_privacy=Male/model-idx=2/seed=10_pr=0.05_defense=Infocensor_iter=3000_bs=500_lambda=0.5_beta=0.0_kappa=1.0', type=str)
 
 args = parser.parse_args()
 print(args)
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-# torch.manual_seed(args.seed)
-# np.random.seed(args.seed)
+torch.manual_seed(args.seed)
+np.random.seed(args.seed)
 # if torch.cuda.is_available():
 #     device = 'cuda'
 #     torch.cuda.manual_seed(args.seed)
@@ -53,6 +53,10 @@ class Client(nn.Module):
             x_private = x_private.to(device)
             mu_private = self.encoder(x_private)
             z_private = get_gaussian(mu_private, sigma)
+        elif defense == 'Infocensor':
+            x_private = x_private.to(device)
+            mu_private, sigma_private = self.encoder(x_private)
+            z_private = mu_private + sigma_private * torch.randn_like(sigma_private)
         else:
             raise ValueError(defense)
 
@@ -86,7 +90,7 @@ class Attacker(nn.Module):
 
         return batch_acc_loss, batch_correct
 
-    def test(self, z_private, label, private_label):
+    def batch_test(self, z_private, label, private_label):
         self.top_model.eval()
         self.decoder.eval()
         batch_attack_correct = 0
@@ -103,9 +107,9 @@ class Attacker(nn.Module):
         batch_top_correct += predicted.eq(label).sum().item()
         _, decoder_predicted = decoder_outputs.max(1)
         batch_attack_correct += decoder_predicted.eq(private_label).sum().item()
+        cm = confusion_matrix(private_label.cpu(), decoder_predicted.cpu())
 
-
-        return batch_top_correct, batch_attack_correct
+        return batch_top_correct, batch_attack_correct, cm
 
 def test(client, attacker, test_loader):
     decoder_correct = 0
@@ -119,14 +123,19 @@ def test(client, attacker, test_loader):
             # send original data to the fixed encoder and get the intermediate features
             x, label, private_label = x.to(device), label.to(device), private_label.to(device)
             z_private = client.get_feature(x)
-            batch_top_correct, batch_attack_correct = attacker.test(z_private, label, private_label)
+            batch_top_correct, batch_attack_correct, batch_cm = attacker.batch_test(z_private, label, private_label)
             decoder_correct += batch_attack_correct
             top_correct += batch_top_correct
+            if batch_idx == 0:
+                cm = batch_cm
+            else:
+                cm += batch_cm
     print("top correct: ",top_correct)
     attack_accuracy = decoder_correct/float(len(test_loader.dataset))
     top_accuracy = top_correct/float(len(test_loader.dataset))
+    attack_Gmean = sqrt(cm[0][0] / (cm[0][0] + cm[0][1]) * cm[1][1] / (cm[1][0] + cm[1][1]))
 
-    return attack_accuracy, top_accuracy
+    return attack_accuracy, top_accuracy, attack_Gmean
 
 def train_decoder(client, attacker, decoder_loader, test_loader):
     attacker_iterator = iter(decoder_loader)
@@ -135,8 +144,9 @@ def train_decoder(client, attacker, decoder_loader, test_loader):
     train_decoder_loss_list = np.array([])
     test_acc_list = np.array([])
     test_attack_acc_list = np.array([])
+    attack_Gmean_list = np.array([])
 
-    logger.info('Iteration \t Train Attacker Loss \t Train Attack Acc \t Test Acc \t Test Attack Acc')
+    logger.info('Iteration \t Train Attacker Loss \t Train Attack Acc \t Test Acc \t Test Attack Acc \t Attack G-mean')
 
     print("TRAINING DECODER...")
     iterator = list(range(args.iterations))
@@ -163,27 +173,36 @@ def train_decoder(client, attacker, decoder_loader, test_loader):
 
         interval = args.test_interval
         if (i+1) % interval == 0:
-            test_attack_acc, test_acc = test(client, attacker, test_loader)
+            test_attack_acc, test_acc, attack_Gmean = test(client, attacker, test_loader)
             test_acc_list = np.append(test_acc_list, test_acc)
             test_attack_acc_list = np.append(test_attack_acc_list, test_attack_acc)
+            attack_Gmean_list = np.append(attack_Gmean_list, attack_Gmean)
             print("attack accuracy: ", test_attack_acc)
             print("test accuracy: ", test_acc)
-            logger.info('%d \t\t %.4f \t\t %.4f \t\t %.4f \t\t %.4f',
+            print("attack G-mean: ", attack_Gmean)
+            logger.info('%d \t\t %.4f \t\t %.4f \t\t %.4f \t\t %.4f \t\t %.4f',
                         (i + 1), train_decoder_loss / interval,
-                        train_decoder_correct / (interval * args.batch_size), test_acc, test_attack_acc
+                        train_decoder_correct / (interval * args.batch_size), test_acc, test_attack_acc, attack_Gmean
                         )
 
             train_decoder_correct = 0
             train_decoder_loss = 0.0
 
-    print("max test acc: ", max(test_acc_list))
-    print("max attack acc: ", max(test_attack_acc_list))
-    logger.info('Max test accuracy: \t %.4f', max(test_acc_list))
-    logger.info('Max test attack accuracy: \t %.4f', max(test_attack_acc_list))
+    max_test_acc = max(test_acc_list)
+    max_attack_acc = max(test_attack_acc_list)
+    max_attack_Gmean = max(attack_Gmean_list)
 
-    plot_and_save_figure(train_decoder_loss_list, [], 'batch', 'loss', 'train decoder loss', save_path, 'train_decoder_loss.png')
-    plot_and_save_figure(train_decoder_acc_list, [], 'batch', 'accuracy', 'attack accuracy', save_path, 'train_decoder_accuracy.png')
+    print("max test acc: ", max_test_acc)
+    print("max attack acc: ", max_attack_acc)
+    print("max attack G-mean: ", max_attack_Gmean)
+    logger.info('Max test accuracy: \t %.4f', max_test_acc)
+    logger.info('Max test attack accuracy: \t %.4f', max_attack_acc)
+    logger.info('Max attack G-mean: \t %.4f', max_attack_Gmean)
 
+    plot_and_save_figure(train_decoder_loss_list, [], 'batch', 'loss', 'train decoder loss', figure_save_path, 'train_decoder_loss.png')
+    plot_and_save_figure(train_decoder_acc_list, [], 'batch', 'accuracy', 'attack accuracy', figure_save_path, 'train_decoder_accuracy.png')
+
+    return max_test_acc, max_attack_acc, max_attack_Gmean
 
 
 if __name__ == '__main__':
@@ -192,12 +211,13 @@ if __name__ == '__main__':
     directory = args.dir
     split_directory = directory.split('/')
     print(split_directory)
+    #'./celebA_results\utility=BlackHair_privacy=Male\model-idx=2\seed=1_pr=0.05_defense=None_iter=3000_bs=500'
 
     dataset = split_directory[1].split('_')[0]
     utility_task = split_directory[2].split('_')[0].split('=')[1]
     privacy_task = split_directory[2].split('_')[1].split('=')[1]
     model_idx = int(split_directory[3].split('_')[0].split('=')[1])
-    defense = split_directory[4].split('_')[0].split('=')[1]
+    defense = split_directory[4].split('_')[2].split('=')[1]
 
     print("dataset: ", dataset)
     print("cloud: ", utility_task)
@@ -211,16 +231,18 @@ if __name__ == '__main__':
         idx = 3000
 
     if defense == 'GMM-LC' or defense == 'GMM-EPO' or defense == 'GMM-ADV' or defense == 'Noisy':
-        sigma = float(split_directory[4].split('_')[3].split('=')[1])
+        sigma = float(split_directory[4].split('_')[4].split('=')[1])
 
     encoder_path = directory + '/models/encoder_%s.pkl'%(str(idx))
     top_model_path = directory + '/models/top_model_%s.pkl'%(str(idx))
     #save_path = directory + '/blackbox-results_iterations=%s' % (str(args.iterations))
-    save_path = directory + '/blackbox'
+    figure_save_path = directory + '/figures/Black_box_loss'
+    #save_path = directory + '/blackbox'
+    result_file = directory + '/logs/result.txt'
 
-    makedir(save_path)
+    makedir(figure_save_path)
 
-    logfile = save_path + '/log.txt'
+    logfile = directory + '/logs/black_box_log.txt'
     if os.path.exists(logfile):
         os.remove(logfile)
 
@@ -239,24 +261,24 @@ if __name__ == '__main__':
 
     if model_idx == 1:
         Encoder = Encoder1
+        InfoEncoder = InfocensorEncoder1
         Classifier = Classifier1
     elif model_idx == 2:
         Encoder = Encoder2
+        InfoEncoder = InfocensorEncoder2
         Classifier = Classifier2
     elif model_idx == 3:
         Encoder = Encoder3
+        InfoEncoder = InfocensorEncoder3
         Classifier = Classifier3
-    elif model_idx == 4:
-        Encoder = Encoder4
-        Classifier = Classifier4
-    elif model_idx == 5:
-        Encoder = Encoder5
-        Classifier = Classifier5
     else:
         raise ValueError(model_idx)
 
+    if defense == 'Infocensor':
+        encoder = InfoEncoder()
+    else:
+        encoder = Encoder()
 
-    encoder = Encoder()
     top_model = Classifier(label_num)
     decoder = Classifier(private_label_num)
     encoder.load_state_dict(torch.load(encoder_path))
@@ -265,11 +287,14 @@ if __name__ == '__main__':
     client = Client(encoder)
     attacker = Attacker(top_model, decoder)
 
-    train_decoder(client, attacker, decoder_loader, test_loader)
+    max_test_acc, max_attack_acc, max_attack_Gmean = train_decoder(client, attacker, decoder_loader, test_loader)
+
+    f = open(result_file, 'a')
+    f.write(str(max_attack_acc) + '\n')
+    f.write(str(max_attack_Gmean) + '\n')
+    f.close()
+
     #attack_accuracy, top_accuracy = test(client, attacker, test_loader)
-
-
-
 
     print("cloud task: ", utility_task)
     print("attack task: ", privacy_task)
